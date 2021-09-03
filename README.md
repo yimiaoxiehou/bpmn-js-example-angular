@@ -127,3 +127,4 @@ npm run all
 ## License
 
 MIT
+# bpmn-js-example-angular
