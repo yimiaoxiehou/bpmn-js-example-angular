@@ -1,111 +1,133 @@
-import {
-  AfterContentInit,
-  Component,
-  ElementRef,
-  Input,
-  OnChanges,
-  OnDestroy,
-  Output,
-  ViewChild,
-  SimpleChanges,
-  EventEmitter
-} from '@angular/core';
+import {Component, OnInit} from '@angular/core';
+import BpmnModeler from 'bpmn-js/lib/Modeler';
+import {CamundaModdleDescriptorModule} from '../model/camunda-moddle-descriptor.module';
+import customTranslate from '../customTranslate/customTranslate';
+import propertiesPanelModule from 'bpmn-js-properties-panel';
+import propertiesProviderModule from 'bpmn-js-properties-panel/lib/provider/camunda';
 
-import { HttpClient } from '@angular/common/http';
-import { map, switchMap } from 'rxjs/operators';
 
-/**
- * You may include a different variant of BpmnJS:
- *
- * bpmn-viewer  - displays BPMN diagrams without the ability
- *                to navigate them
- * bpmn-modeler - bootstraps a full-fledged BPMN editor
- */
-import * as BpmnJS from 'bpmn-js/dist/bpmn-modeler.production.min.js';
-
-import { from, Observable, Subscription } from 'rxjs';
+const defaultXML = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn2:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xmlns:bpmn2="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                   xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                   xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                   xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                   xsi:schemaLocation="http://www.omg.org/spec/BPMN/20100524/MODEL BPMN20.xsd" id="sample-diagram"
+                   targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn2:process id="Process_1" isExecutable="false">
+    <bpmn2:startEvent id="StartEvent_1"/>
+  </bpmn2:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_1">
+      <bpmndi:BPMNShape id="_BPMNShape_StartEvent_2" bpmnElement="StartEvent_1">
+        <dc:Bounds height="36.0" width="36.0" x="412.0" y="240.0"/>
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn2:definitions>`;
 
 @Component({
   selector: 'app-diagram',
-  template: `
-    <div #ref class="diagram-container"></div>
-  `,
-  styles: [
-    `
-      .diagram-container {
-        height: 100%;
-        width: 100%;
-      }
-    `
-  ]
+  templateUrl: './diagram.component.html'
 })
-export class DiagramComponent implements AfterContentInit, OnChanges, OnDestroy {
-  private bpmnJS: BpmnJS;
+export class DiagramComponent implements OnInit {
+  public modeler: any;
+  private state: any;
 
-  @ViewChild('ref', { static: true }) private el: ElementRef;
-  @Output() private importDone: EventEmitter<any> = new EventEmitter();
-
-  @Input() private url: string;
-
-  constructor(private http: HttpClient) {
-
-    this.bpmnJS = new BpmnJS();
-
-    this.bpmnJS.on('import.done', ({ error }) => {
-      if (!error) {
-        this.bpmnJS.get('canvas').zoom('fit-viewport');
+  ngOnInit() {
+    const customTranslateModule = {
+      translate: ['value', customTranslate]
+    };
+    this.modeler = new BpmnModeler({
+      container: '#el',
+      propertiesPanel: {
+        parent: '#js-properties-panel'
+      },
+      additionalModules: [
+        propertiesProviderModule,
+        propertiesPanelModule,
+        customTranslateModule
+      ],
+      moddleExtensions: {
+        camunda: CamundaModdleDescriptorModule
       }
+    });
+    this.modeler.importXML(defaultXML);
+  }
+
+  /**
+   * 下载xml/svg
+   *  @param  type  类型  svg / xml
+   *  @param  data  数据
+   *  @param  name  文件名称
+   */
+  download = (type, data, name) => {
+    let dataTrack = '';
+    const a = document.createElement('a');
+
+    switch (type) {
+      case 'xml':
+        dataTrack = 'bpmn';
+        break;
+      case 'svg':
+        dataTrack = 'svg';
+        break;
+      default:
+        break;
+    }
+
+    name = name || `diagram.${dataTrack}`;
+
+    a.setAttribute('href', `data:application/bpmn20-xml;charset=UTF-8,${encodeURIComponent(data)}`);
+    a.setAttribute('target', '_blank');
+    a.setAttribute('dataTrack', `diagram:download-${dataTrack}`);
+    a.setAttribute('download', name);
+
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  // 前进
+  handleRedo = () => {
+    this.modeler.get('commandStack').redo();
+  }
+
+  // 后退
+  handleUndo = () => {
+    this.modeler.get('commandStack').undo();
+  }
+
+  // 下载SVG格式
+  handleDownloadSvg = () => {
+    this.modeler.saveSVG({format: true}, (err, data) => {
+      this.download('svg', data, 'svg');
     });
   }
 
-  ngAfterContentInit(): void {
-    this.bpmnJS.attachTo(this.el.nativeElement);
+  // 下载XML格式
+  handleDownloadXml = () => {
+    this.modeler.saveXML({format: true}, (err, data) => {
+      this.download('xml', data, 'xml');
+    });
   }
 
-  ngOnChanges(changes: SimpleChanges) {
-    // re-import whenever the url changes
-    if (changes.url) {
-      this.loadUrl(changes.url.currentValue);
-    }
+  // 流程图放大缩小
+  handleZoom = (radio) => {
+    const newScale = !radio
+      ? 1.0 // 不输入radio则还原
+      : this.state.scale + radio <= 0.2 // 最小缩小倍数
+        ? 0.2
+        : this.state.scale + radio;
+
+    this.modeler.get('canvas').zoom(newScale);
+    this.state.scale = newScale;
   }
 
-  ngOnDestroy(): void {
-    this.bpmnJS.destroy();
-  }
-
-  /**
-   * Load diagram from URL and emit completion event
-   */
-  loadUrl(url: string): Subscription {
-
-    return (
-      this.http.get(url, { responseType: 'text' }).pipe(
-        switchMap((xml: string) => this.importDiagram(xml)),
-        map(result => result.warnings),
-      ).subscribe(
-        (warnings) => {
-          this.importDone.emit({
-            type: 'success',
-            warnings
-          });
-        },
-        (err) => {
-          this.importDone.emit({
-            type: 'error',
-            error: err
-          });
-        }
-      )
-    );
-  }
-
-  /**
-   * Creates a Promise to import the given XML into the current
-   * BpmnJS instance, then returns it as an Observable.
-   *
-   * @see https://github.com/bpmn-io/bpmn-js-callbacks-to-promises#importxml
-   */
-  private importDiagram(xml: string): Observable<{warnings: Array<any>}> {
-    return from(this.bpmnJS.importXML(xml) as Promise<{warnings: Array<any>}>);
+  // 保存
+  handleSave() {
+    this.modeler.saveXML({format: true}, async (err, xml) => {
+      console.log(xml);
+    });
   }
 }
